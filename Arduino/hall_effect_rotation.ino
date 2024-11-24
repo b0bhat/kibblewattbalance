@@ -1,178 +1,161 @@
+#include <SoftPWM.h>
 #include <SPI.h>
-/*PINS
-   Arduino SPI pins
-   MOSI = 11, MISO = 12, SCK = 13, CS = 10
-   STM32 SPI pins
-   MOSI = PA7, MISO = PA6, SCK = PA5, CS = PA4
-*/
+#include <Wire.h>
 
-const byte CS_pin = 10; //Chip select pin for manual switching
+#define COILAP A0
+#define COILAN A1
+#define COILAGND A2
 
-uint16_t rawData = 0; //bits from the encoder (16 bits, but top 2 has to be discarded)
-float degAngle = 0; //Angle in degrees
-float startAngle = 0; //starting angle for reference
-float correctedAngle = 0; //tared angle value (degAngle-startAngle)
-float totalAngle = 0; //total accumulated angular displacement
-float numberofTurns = 0;
-float rpmCounter = 0; //counts the number of turns for a certain period
-float revsPerMin = 0; //RPM
-int quadrantNumber = 0;
-int previousquadrantNumber = 0;
+const byte CS_pin = 10;
+uint16_t command = 0b1111111111111111;
 
-uint16_t command = 0b1111111111111111; //read command (0xFFF)
+float coil1_r = 1700.0;
+float res1 = 9850.0;
 
-float timer = 0; //timer for updating the LCD and sending the data through the serial port
-float rpmTimer = 0; //timer for estimating the RPM
+bool forceMode = false;
 
-void setup()
-{
-  SPI.begin();
+float pos;
+
+int lowbyte; //raw angle 7:0
+word highbyte; //raw angle 7:0 and 11:8
+int rawAngle; //final raw angle 
+float degAngle;
+int magnetStatus = 0;
+
+float calibratedAngle = 7.4;
+
+uint8_t duty_cycle = 0;
+
+void setup() {
+  //Serial.begin(9600);
   Serial.begin(9600);
-  Serial.println("AS5048A - Magnetic position encoder");
-  pinMode(CS_pin, OUTPUT); //CS pin - output
-
-  //Checking the initial angle
-  readRegister();
-  startAngle = degAngle;
+  Wire.begin(); //start i2C  
+	Wire.setClock(800000L);
+  checkMagnetPresence();
+  readRawAngle();
 }
 
-void loop()
-{
-  readRegister(); //read the position of the magnet
-  //correctAngle(); //normalize the previous reading
-  // checkQuadrant(); //check the direction of the rotation and calculate the final displacement
-
-  // if (millis() - timer > 250)
-  // {
-  //   Serial.print("Turns: ");
-  //   Serial.println(numberofTurns);
-
-  //   Serial.print("Total Angle: ");
-  //   Serial.println(totalAngle, 2);
-
-  //   updateLCD(); //print the new contents on the LCD (only the numbers)
-  //   timer = millis();
-  // }
-
-  // if (millis() - rpmTimer > 15000) //check and calculate RPM every 15 sec
-  // {
-  //   revsPerMin = 4 * rpmCounter; //60000/15000 = 4 (we assume the same speed for the whole minute)
-
-  //   rpmCounter = 0; //reset
-  //   rpmTimer = millis();
-  // }
-}
-
-void readRegister()
-{
-  SPI.beginTransaction(SPISettings(3000000, MSBFIRST, SPI_MODE1));
-
-  //--sending the command
-  digitalWrite(CS_pin, LOW);
-  SPI.transfer16(command);
-  digitalWrite(CS_pin, HIGH);
-
-  delay(10);
-
-  //--receiving the reading
-  digitalWrite(CS_pin, LOW);
-  rawData = SPI.transfer16(command);
-  digitalWrite(CS_pin, HIGH);
-
-  SPI.endTransaction();
-
-  rawData = rawData & 0b0011111111111111; //removing the top 2 bits (PAR and EF)
-  float newdegAngle = (float)rawData / 16384.0 * 360.0; //16384 = 2^14, 360 = 360 degrees
-  if (rawData != 0 && rawData != 16383 && rawData != 0.02) {
-    Serial.println(newdegAngle);
+void force_mode() {
+  if(!forceMode){
+    pinMode(COILAP, OUTPUT);
+    pinMode(COILAN, OUTPUT);
+    pinMode(COILAGND, INPUT);
+    digitalWrite(COILAN, LOW);
+    SoftPWMSet(COILAP, 0);
+    SoftPWMSetFadeTime(COILAP, 10, 10);
+    // digitalWrite(COILBP, LOW);
+    // digitalWrite(COILBN, LOW);
+    delay(100);
+    forceMode = true;
   }
-  // if (degAngle != newdegAngle) {
-  //   if (degAngle != 0 && degAngle != 359.98 && degAngle != 0.02) {
-  //     Serial.println(degAngle);
-  //   }
-    
-  // }
 
+  // assuming pos is being updated
+  if(fabs(degAngle) <= 0.05){ // Position is balanced
+    //update_mass();
+    Serial.print("Measured mass: ");
+    Serial.println(mass);
+    //digitalWrite(CALIBLED, HIGH);
+  } else {
+    int16_t new_duty_cycle = (duty_cycle + (-pos * 500));
+    if (new_duty_cycle > 255) {
+      new_duty_cycle = 255;
+    }
+    else if (new_duty_cycle < 0){
+      new_duty_cycle = 0;
+    }
+    duty_cycle = new_duty_cycle;
+    // Serial.print("Duty Cycle: ");
+    // Serial.println(duty_cycle);
+    SoftPWMSet(COILAP, duty_cycle);
+    digitalWrite(CALIBLED, LOW);
+  }
+
+}
+
+void readRawAngle() { 
+  //7:0 - bits
+  Wire.beginTransmission(0x36); //connect to the sensor
+  Wire.write(0x0D); //figure 21 - register map: Raw angle (7:0)
+  Wire.endTransmission(); //end transmission
+  Wire.requestFrom(0x36, 1); //request from the sensor
   
-  degAngle = newdegAngle;
+  while(Wire.available() == 0); //wait until it becomes available 
+  lowbyte = Wire.read(); //Reading the data after the request
+ 
+  //11:8 - 4 bits
+  Wire.beginTransmission(0x36);
+  Wire.write(0x0C); //figure 21 - register map: Raw angle (11:8)
+  Wire.endTransmission();
+  Wire.requestFrom(0x36, 1);
+  
+  while(Wire.available() == 0);  
+  highbyte = Wire.read();
+  highbyte = highbyte << 8; //shifting to left
+
+  rawAngle = highbyte | lowbyte; //int is 16 bits (as well as the word)
+  degAngle = rawAngle * 0.087890625;
+  //Serial.println(degAngle, 5);
 }
 
-void correctAngle()
-{
+void correctAngle() {
   //recalculate angle
-  correctedAngle = degAngle - startAngle; //this tares the position
+  float correctedAngle = degAngle - calibratedAngle; //this tares the position
 
-  if (correctedAngle < 0) //if the calculated angle is negative, we need to "normalize" it
-  {
+  if(correctedAngle < 0) { //if the calculated angle is negative, we need to "normalize" it
     correctedAngle = correctedAngle + 360; //correction for negative numbers (i.e. -15 becomes +345)
-  }
-  else
-  {
+  } else if (correctedAngle >= 360) {
+    correctedAngle = correctedAngle - 360;
+  } else {
     //do nothing
   }
-  Serial.print("Corrected angle: ");
-  Serial.println(correctedAngle, 2); //print the corrected/tared angle
+  Serial.println(correctedAngle, 3); //print the corrected/tared angle  
 }
 
-void checkQuadrant()
-{
-  /*
-    //Quadrants:
-    4  |  1
-    ---|---
-    3  |  2
-  */
+void get_current_current() {
+  int sensorValue = analogRead(A0);
+  float voltage = 1000 * sensorValue * (5.0 / 1023.0);
+  float current = voltage/(coil1_r+res1);
+  Serial.println(current,3);
+  delay(10);
+}
 
-  //Quadrant 1
-  if (correctedAngle >= 0 && correctedAngle <= 90)
+double get_current(){
+  double current = (((duty_cycle / 255.0) * 100.0) * 5.0)/83.1;
+  return current;
+}
+
+void update_mass(){
+  double bl = get_avg_bl();
+  double i = get_current();
+  mass = bl * (i/GRAVITY);
+}
+
+void get_avg_bl() {
+  return 4;
+}
+
+void loop() {
+  //getcurrent();
+  readRawAngle();
+  correctAngle();
+}
+
+void checkMagnetPresence() {  
+  //This function runs in the setup() and it locks the MCU until the magnet is not positioned properly
+
+  while((magnetStatus & 32) != 32) //while the magnet is not adjusted to the proper distance - 32: MD = 1
   {
-    quadrantNumber = 1;
-  }
+    magnetStatus = 0; //reset reading
 
-  //Quadrant 2
-  if (correctedAngle > 90 && correctedAngle <= 180)
-  {
-    quadrantNumber = 2;
-  }
+    Wire.beginTransmission(0x36); //connect to the sensor
+    Wire.write(0x0B); //figure 21 - register map: Status: MD ML MH
+    Wire.endTransmission(); //end transmission
+    Wire.requestFrom(0x36, 1); //request from the sensor
 
-  //Quadrant 3
-  if (correctedAngle > 180 && correctedAngle <= 270)
-  {
-    quadrantNumber = 3;
-  }
+    while(Wire.available() == 0); //wait until it becomes available 
+    magnetStatus = Wire.read(); //Reading the data after the request
 
-  //Quadrant 4
-  if (correctedAngle > 270 && correctedAngle < 360)
-  {
-    quadrantNumber = 4;
-  }
-  //Serial.print("Quadrant: ");
-  //Serial.println(quadrantNumber); //print our position "quadrant-wise"
-
-  if (quadrantNumber != previousquadrantNumber) //if we changed quadrant
-  {
-    if (quadrantNumber == 1 && previousquadrantNumber == 4)
-    {
-      numberofTurns++; // 4 --> 1 transition: CW rotation
-      rpmCounter++;
-    }
-
-    if (quadrantNumber == 4 && previousquadrantNumber == 1)
-    {
-      numberofTurns--; // 1 --> 4 transition: CCW rotation
-      rpmCounter--;
-    }
-    //this could be done between every quadrants so one can count every 1/4th of transition
-
-    previousquadrantNumber = quadrantNumber;  //update to the current quadrant
-
-  }
-  //Serial.print("Turns: ");
-  //Serial.println(numberofTurns); //number of turns in absolute terms (can be negative which indicates CCW turns)
-
-  //after we have the corrected angle and the turns, we can calculate the total absolute position
-
-  totalAngle = (numberofTurns * 360) + correctedAngle; //number of turns (+/-) plus the actual angle within the 0-360 range
-  //Serial.print("Total angle: ");
-  //Serial.println(totalAngle, 2); //absolute position of the motor expressed in degree angles, 2 digits
+    //Serial.print("Magnet status: ");
+    //Serial.println(magnetStatus, BIN); //print it in binary so you can compare it to the table (fig 21)      
+  }        
 }
