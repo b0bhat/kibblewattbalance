@@ -2,10 +2,6 @@
 #include <SPI.h>
 #include <Wire.h>
 
-#define COILAP A0
-#define COILAN A1
-#define COILAGND A2
-
 const byte CS_pin = 10;
 uint16_t command = 0b1111111111111111;
 
@@ -29,29 +25,36 @@ uint8_t duty_cycle = 0;
 void setup() {
   //Serial.begin(9600);
   Serial.begin(9600);
+
+  // setup hall effect sensor
   Wire.begin(); //start i2C  
 	Wire.setClock(800000L);
   checkMagnetPresence();
   readRawAngle();
+
+  // setup coils
+
+  Serial.println("initialized");
 }
+
+// set to digital pins instead
+#define COILAP 9
+#define COILAN 10
+#define COILAGND 11
 
 void force_mode() {
   if(!forceMode){
     pinMode(COILAP, OUTPUT);
     pinMode(COILAN, OUTPUT);
-    pinMode(COILAGND, INPUT);
-    digitalWrite(COILAN, LOW);
-    SoftPWMSet(COILAP, 0);
-    SoftPWMSetFadeTime(COILAP, 10, 10);
-    // digitalWrite(COILBP, LOW);
-    // digitalWrite(COILBN, LOW);
+    analogWrite(COILAP, 0);
+    analogWrite(COILAN, 0);
     delay(100);
     forceMode = true;
   }
 
   // assuming pos is being updated
-  if(fabs(degAngle) <= 0.05){ // Position is balanced
-    //update_mass();
+  if(fabs(degAngle-calibratedAngle) <= 0.5){ // Position is balanced
+    update_mass();
     Serial.print("Measured mass: ");
     Serial.println(mass);
     //digitalWrite(CALIBLED, HIGH);
@@ -64,10 +67,8 @@ void force_mode() {
       new_duty_cycle = 0;
     }
     duty_cycle = new_duty_cycle;
-    // Serial.print("Duty Cycle: ");
-    // Serial.println(duty_cycle);
-    SoftPWMSet(COILAP, duty_cycle);
-    digitalWrite(CALIBLED, LOW);
+    analogWrite(COILAP, duty_cycle);
+    //digitalWrite(CALIBLED, LOW);
   }
 
 }
@@ -111,6 +112,7 @@ void correctAngle() {
   Serial.println(correctedAngle, 3); //print the corrected/tared angle  
 }
 
+// not used
 void get_current_current() {
   int sensorValue = analogRead(A0);
   float voltage = 1000 * sensorValue * (5.0 / 1023.0);
@@ -120,7 +122,7 @@ void get_current_current() {
 }
 
 double get_current(){
-  double current = (((duty_cycle / 255.0) * 100.0) * 5.0)/83.1;
+  double current = (((duty_cycle / 255.0) * 100.0) * 5.0)/83.1; // 83.1 is resistance?
   return current;
 }
 
@@ -135,16 +137,17 @@ void get_avg_bl() {
 }
 
 void loop() {
-  //getcurrent();
+  // update arm angle
   readRawAngle();
-  correctAngle();
+
+  // then do forcemode
+  force_mode();
 }
 
 void checkMagnetPresence() {  
   //This function runs in the setup() and it locks the MCU until the magnet is not positioned properly
 
-  while((magnetStatus & 32) != 32) //while the magnet is not adjusted to the proper distance - 32: MD = 1
-  {
+  while((magnetStatus & 32) != 32)  {
     magnetStatus = 0; //reset reading
 
     Wire.beginTransmission(0x36); //connect to the sensor
