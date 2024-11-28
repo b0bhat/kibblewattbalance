@@ -9,6 +9,7 @@ float coil1_r = 1700.0;
 float res1 = 9850.0;
 
 bool forceMode = false;
+bool startFlag = false;
 
 float pos;
 
@@ -25,6 +26,9 @@ uint8_t duty_cycle = 0;
 void setup() {
   //Serial.begin(9600);
   Serial.begin(9600);
+  while (!Serial) {
+    ;
+  }
 
   // setup hall effect sensor
   Wire.begin(); //start i2C  
@@ -137,6 +141,19 @@ void get_avg_bl() {
 }
 
 void loop() {
+  // check script start
+  if (!startFlag) {
+    if (Serial.available() > 0) {
+      String command = Serial.readStringUntil('\n');
+      if (command == "START") {
+        startFlag = true;
+        Serial.println("Starting");
+      }
+    }
+    return;
+  }
+
+
   // update arm angle
   readRawAngle();
 
