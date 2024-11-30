@@ -1,4 +1,3 @@
-#include <SoftPWM.h>
 #include <SPI.h>
 #include <Wire.h>
 
@@ -19,16 +18,20 @@ int rawAngle; //final raw angle
 float degAngle;
 int magnetStatus = 0;
 
-float calibratedAngle = 7.4;
+float calibratedAngle = 15;
+
+float mass;
+#define GRAVITY 9.81
+#define ARM_LENGTH 0.2
 
 uint8_t duty_cycle = 0;
 
 void setup() {
   //Serial.begin(9600);
   Serial.begin(9600);
-  while (!Serial) {
-    ;
-  }
+  // while (!Serial) {
+  //   ;
+  // }
 
   // setup hall effect sensor
   Wire.begin(); //start i2C  
@@ -44,7 +47,7 @@ void setup() {
 // set to digital pins instead
 #define COILAP 9
 #define COILAN 10
-#define COILAGND 11
+//#define COILAGND 11
 
 void force_mode() {
   if(!forceMode){
@@ -56,6 +59,9 @@ void force_mode() {
     forceMode = true;
   }
 
+  double rotation_radians = degAngle * (PI / 180.0);
+  pos = rotation_radians * ARM_LENGTH;
+
   // assuming pos is being updated
   if(fabs(degAngle-calibratedAngle) <= 0.5){ // Position is balanced
     update_mass();
@@ -63,6 +69,9 @@ void force_mode() {
     Serial.println(mass);
     //digitalWrite(CALIBLED, HIGH);
   } else {
+    Serial.print("pushing: ");
+    Serial.println(pos);
+    Serial.println(duty_cycle);
     int16_t new_duty_cycle = (duty_cycle + (-pos * 500));
     if (new_duty_cycle > 255) {
       new_duty_cycle = 255;
@@ -72,6 +81,29 @@ void force_mode() {
     }
     duty_cycle = new_duty_cycle;
     analogWrite(COILAP, duty_cycle);
+    //digitalWrite(CALIBLED, LOW);
+  }
+
+}
+
+void force_mode_test() {
+  if(!forceMode){
+    pinMode(COILAP, OUTPUT);
+    pinMode(COILAN, OUTPUT);
+    analogWrite(COILAP, 0);
+    analogWrite(COILAN, 0);
+    delay(100);
+    forceMode = true;
+  }
+
+  // assuming pos is being updated
+  if(duty_cycle < 200){ // Position is balanced
+    Serial.print("pushing: ");
+    Serial.println(duty_cycle);
+    analogWrite(COILAP, duty_cycle);
+    duty_cycle = duty_cycle + 1;
+    delay(50);
+    readRawAngle();
     //digitalWrite(CALIBLED, LOW);
   }
 
@@ -99,7 +131,7 @@ void readRawAngle() {
 
   rawAngle = highbyte | lowbyte; //int is 16 bits (as well as the word)
   degAngle = rawAngle * 0.087890625;
-  //Serial.println(degAngle, 5);
+  Serial.println(degAngle, 5);
 }
 
 void correctAngle() {
@@ -113,7 +145,7 @@ void correctAngle() {
   } else {
     //do nothing
   }
-  Serial.println(correctedAngle, 3); //print the corrected/tared angle  
+  //Serial.println(correctedAngle, 3); //print the corrected/tared angle  
 }
 
 // not used
@@ -136,29 +168,31 @@ void update_mass(){
   mass = bl * (i/GRAVITY);
 }
 
-void get_avg_bl() {
+double get_avg_bl() {
   return 4;
 }
 
 void loop() {
-  // check script start
-  if (!startFlag) {
-    if (Serial.available() > 0) {
-      String command = Serial.readStringUntil('\n');
-      if (command == "START") {
-        startFlag = true;
-        Serial.println("Starting");
-      }
-    }
-    return;
-  }
 
+
+  // check script start
+  // if (!startFlag) {
+  //   if (Serial.available() > 0) {
+  //     String command = Serial.readStringUntil('\n');
+  //     if (command == "START") {
+  //       startFlag = true;
+  //       Serial.println("Starting");
+  //     }
+  //   }
+  //   return;
+  // }
 
   // update arm angle
-  readRawAngle();
+  //readRawAngle();
 
   // then do forcemode
-  force_mode();
+  //force_mode();
+  force_mode_test();
 }
 
 void checkMagnetPresence() {  
