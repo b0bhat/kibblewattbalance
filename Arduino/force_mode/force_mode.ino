@@ -18,7 +18,7 @@ int rawAngle; //final raw angle
 float degAngle;
 int magnetStatus = 0;
 
-float calibratedAngle = 15;
+float calibratedAngle = 0;
 
 float mass;
 #define GRAVITY 9.81
@@ -26,22 +26,29 @@ float mass;
 
 uint8_t duty_cycle = 0;
 
+// input
+char receivedChar;
+boolean newData = false;
+
 void setup() {
   //Serial.begin(9600);
   Serial.begin(9600);
   // while (!Serial) {
   //   ;
   // }
+}
 
+void begininit() {
   // setup hall effect sensor
   Wire.begin(); //start i2C  
 	Wire.setClock(800000L);
   checkMagnetPresence();
   readRawAngle();
-
-  // setup coils
+  calibratedAngle = degAngle;
 
   Serial.println("initialized");
+  Serial.print("calibrated angle: ");
+  Serial.println(degAngle);
 }
 
 // set to digital pins instead
@@ -49,62 +56,33 @@ void setup() {
 #define COILAN 10
 //#define COILAGND 11
 
-void force_mode() {
-  if(!forceMode){
-    pinMode(COILAP, OUTPUT);
-    pinMode(COILAN, OUTPUT);
-    analogWrite(COILAP, 0);
-    analogWrite(COILAN, 0);
-    delay(100);
-    forceMode = true;
-  }
-
-  double rotation_radians = degAngle * (PI / 180.0);
-  pos = rotation_radians * ARM_LENGTH;
-
-  // assuming pos is being updated
-  if(fabs(degAngle-calibratedAngle) <= 0.5){ // Position is balanced
-    update_mass();
-    Serial.print("Measured mass: ");
-    Serial.println(mass);
-    //digitalWrite(CALIBLED, HIGH);
-  } else {
-    Serial.print("pushing: ");
-    Serial.println(pos);
-    Serial.println(duty_cycle);
-    int16_t new_duty_cycle = (duty_cycle + (-pos * 500));
-    if (new_duty_cycle > 255) {
-      new_duty_cycle = 255;
-    }
-    else if (new_duty_cycle < 0){
-      new_duty_cycle = 0;
-    }
-    duty_cycle = new_duty_cycle;
-    analogWrite(COILAP, duty_cycle);
-    //digitalWrite(CALIBLED, LOW);
-  }
-
+void force_mode_setup() {
+  pinMode(COILAP, OUTPUT);
+  pinMode(COILAN, OUTPUT);
+  analogWrite(COILAP, 0);
+  analogWrite(COILAN, 0);
+  delay(1000);
+  forceMode = true;
 }
 
-void force_mode_test() {
-  if(!forceMode){
-    pinMode(COILAP, OUTPUT);
-    pinMode(COILAN, OUTPUT);
-    analogWrite(COILAP, 0);
-    analogWrite(COILAN, 0);
-    delay(100);
-    forceMode = true;
-  }
-
+void force_mode() {
   // assuming pos is being updated
-  if(duty_cycle < 200){ // Position is balanced
+  Serial.println(fabs(degAngle-calibratedAngle));
+  if(fabs(degAngle-calibratedAngle) <= 0.1) {
+    update_mass();
+    Serial.print("Measured mass (g): ");
+    Serial.println(mass);
+    resetState();
+  } else if(duty_cycle < 250){ // Position is not yet balanced
     Serial.print("pushing: ");
     Serial.println(duty_cycle);
     analogWrite(COILAP, duty_cycle);
-    duty_cycle = duty_cycle + 1;
+    duty_cycle  = duty_cycle + 1;
     delay(50);
     readRawAngle();
     //digitalWrite(CALIBLED, LOW);
+  } else {
+    Serial.println("end");
   }
 
 }
@@ -131,30 +109,7 @@ void readRawAngle() {
 
   rawAngle = highbyte | lowbyte; //int is 16 bits (as well as the word)
   degAngle = rawAngle * 0.087890625;
-  Serial.println(degAngle, 5);
-}
-
-void correctAngle() {
-  //recalculate angle
-  float correctedAngle = degAngle - calibratedAngle; //this tares the position
-
-  if(correctedAngle < 0) { //if the calculated angle is negative, we need to "normalize" it
-    correctedAngle = correctedAngle + 360; //correction for negative numbers (i.e. -15 becomes +345)
-  } else if (correctedAngle >= 360) {
-    correctedAngle = correctedAngle - 360;
-  } else {
-    //do nothing
-  }
-  //Serial.println(correctedAngle, 3); //print the corrected/tared angle  
-}
-
-// not used
-void get_current_current() {
-  int sensorValue = analogRead(A0);
-  float voltage = 1000 * sensorValue * (5.0 / 1023.0);
-  float current = voltage/(coil1_r+res1);
-  Serial.println(current,3);
-  delay(10);
+  //Serial.println(degAngle, 5);
 }
 
 double get_current(){
@@ -169,35 +124,59 @@ void update_mass(){
 }
 
 double get_avg_bl() {
-  return 4;
+  return 3;
+}
+
+void recvOneChar() {
+    if (Serial.available() > 0) {
+        receivedChar = Serial.read();
+        newData = true;
+    }
+}
+
+void resetState() {
+  startFlag = false;
+  forceMode = false;
+  pinMode(COILAP, OUTPUT);
+  pinMode(COILAN, OUTPUT);
+  analogWrite(COILAP, 0);
+  analogWrite(COILAN, 0);
+  degAngle = 0;
+  duty_cycle = 0;
+  delay(100);
+  Serial.println("reset");
 }
 
 void loop() {
+  recvOneChar();
+  if (!startFlag) {
+    if (receivedChar == 's') {
+      startFlag = true;
+      begininit();
+    } else {
+      return;
+    }
+  }
 
+  if (receivedChar == 'f') {
+    force_mode_setup();
+  }
 
-  // check script start
-  // if (!startFlag) {
-  //   if (Serial.available() > 0) {
-  //     String command = Serial.readStringUntil('\n');
-  //     if (command == "START") {
-  //       startFlag = true;
-  //       Serial.println("Starting");
-  //     }
-  //   }
-  //   return;
-  // }
+  if (receivedChar == 'r') {
+    resetState();
+  }
 
-  // update arm angle
-  //readRawAngle();
+  if (forceMode) {
+      // do forcemode
+      readRawAngle();
+      force_mode_test();
+  }
 
-  // then do forcemode
-  //force_mode();
-  force_mode_test();
+  //force_mode_test();
 }
 
 void checkMagnetPresence() {  
   //This function runs in the setup() and it locks the MCU until the magnet is not positioned properly
-
   while((magnetStatus & 32) != 32)  {
     magnetStatus = 0; //reset reading
 
@@ -207,9 +186,6 @@ void checkMagnetPresence() {
     Wire.requestFrom(0x36, 1); //request from the sensor
 
     while(Wire.available() == 0); //wait until it becomes available 
-    magnetStatus = Wire.read(); //Reading the data after the request
-
-    //Serial.print("Magnet status: ");
-    //Serial.println(magnetStatus, BIN); //print it in binary so you can compare it to the table (fig 21)      
+    magnetStatus = Wire.read(); //Reading the data after the request      
   }        
 }
