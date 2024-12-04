@@ -46,8 +46,8 @@ void begininit() {
   readRawAngle();
   calibratedAngle = degAngle;
 
-  Serial.println("initialized");
-  Serial.print("calibrated angle: ");
+  // Serial.println("initialized");
+  // Serial.print("calibrated angle: ");
   Serial.println(degAngle);
 }
 
@@ -74,8 +74,8 @@ void force_mode() {
     Serial.println(mass);
     resetState();
   } else if(duty_cycle < 250){ // Position is not yet balanced
-    Serial.print("pushing: ");
-    Serial.println(duty_cycle);
+    //Serial.print("pushing: ");
+    //Serial.println(duty_cycle);
     analogWrite(COILAP, duty_cycle);
     duty_cycle  = duty_cycle + 1;
     delay(50);
@@ -169,7 +169,7 @@ void loop() {
   if (forceMode) {
       // do forcemode
       readRawAngle();
-      force_mode_test();
+      force_mode();
   }
 
   //force_mode_test();
