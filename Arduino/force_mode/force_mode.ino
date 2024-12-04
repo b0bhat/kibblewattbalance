@@ -68,12 +68,9 @@ void force_mode_setup() {
 void force_mode() {
   // assuming pos is being updated
   Serial.println(fabs(degAngle-calibratedAngle));
-  if(fabs(degAngle-calibratedAngle) <= 0.1) {
+  if(fabs(degAngle-calibratedAngle) <= 0.08) {
     update_mass();
-    Serial.print("Measured mass (g): ");
-    Serial.println(mass);
-    resetState();
-  } else if(duty_cycle < 250){ // Position is not yet balanced
+  } else if(duty_cycle < 255){ // Position is not yet balanced
     //Serial.print("pushing: ");
     //Serial.println(duty_cycle);
     analogWrite(COILAP, duty_cycle);
@@ -82,10 +79,13 @@ void force_mode() {
     readRawAngle();
     //digitalWrite(CALIBLED, LOW);
   } else {
-    Serial.println("end");
+    delay(50);
+    Serial.println("max voltage reached");
+    resetState();
   }
 
 }
+
 
 void readRawAngle() { 
   //7:0 - bits
@@ -113,18 +113,23 @@ void readRawAngle() {
 }
 
 double get_current(){
-  double current = (((duty_cycle / 255.0) * 100.0) * 5.0)/83.1; // 83.1 is resistance?
-  return current;
+  double current = ((duty_cycle / 255.0) * 5.0)/1700; // I=V/R
+  return current*100;
 }
 
 void update_mass(){
   double bl = get_avg_bl();
   double i = get_current();
-  mass = bl * (i/GRAVITY);
+  mass = 15 * bl * (i/GRAVITY);
+
+  Serial.print("Measured mass (g): ");
+  Serial.println(mass);
+  resetState();
 }
 
 double get_avg_bl() {
-  return 3;
+  // length is 3708ft
+  return 4;
 }
 
 void recvOneChar() {

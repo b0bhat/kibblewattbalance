@@ -57,7 +57,7 @@ def ForceMode():
                 except ValueError:
                     print(data)
                     stop()
-    except KeyboardInterrupt:
+    except:
         stop()
 
 def stop():
