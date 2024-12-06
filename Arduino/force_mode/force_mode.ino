@@ -67,19 +67,25 @@ void force_mode_setup() {
 
 void force_mode() {
   // assuming pos is being updated
-  Serial.println(fabs(degAngle-calibratedAngle));
+  //Serial.println(fabs(degAngle-calibratedAngle));
   if(fabs(degAngle-calibratedAngle) <= 0.08) {
     update_mass();
   } else if(duty_cycle < 255){ // Position is not yet balanced
     //Serial.print("pushing: ");
     //Serial.println(duty_cycle);
     analogWrite(COILAP, duty_cycle);
-    duty_cycle  = duty_cycle + 1;
-    delay(50);
+    duty_cycle  = duty_cycle + 2;
+    //duty_cycle = max(0, min(duty_cycle, 255));
+    delay(200);
     readRawAngle();
+    Serial.print("Angle Difference:");
+    Serial.print(fabs(degAngle-calibratedAngle), 5);
+    Serial.print(",");
+    Serial.print("Voltage:");
+    Serial.println(get_voltage(), 5);
     //digitalWrite(CALIBLED, LOW);
   } else {
-    delay(50);
+    delay(100);
     Serial.println("max voltage reached");
     resetState();
   }
@@ -109,18 +115,21 @@ void readRawAngle() {
 
   rawAngle = highbyte | lowbyte; //int is 16 bits (as well as the word)
   degAngle = rawAngle * 0.087890625;
-  //Serial.println(degAngle, 5);
+}
+
+double get_voltage() {
+  return (duty_cycle / 255.0) * 5.0;
 }
 
 double get_current(){
-  double current = ((duty_cycle / 255.0) * 5.0)/1700; // I=V/R
+  double current = get_voltage()/1800; // I=V/R
   return current*100;
 }
 
 void update_mass(){
   double bl = get_avg_bl();
   double i = get_current();
-  mass = 15 * bl * (i/GRAVITY);
+  mass = 25 * bl * (i/GRAVITY);
 
   Serial.print("Measured mass (g): ");
   Serial.println(mass);
