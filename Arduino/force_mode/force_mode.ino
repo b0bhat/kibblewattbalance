@@ -6,8 +6,10 @@ uint16_t command = 0b1111111111111111;
 
 float coil1_r = 1700.0;
 float res1 = 9850.0;
+float c_value = 1.5;
 
 bool forceMode = false;
+bool velocityMode = false;
 bool startFlag = false;
 
 float pos;
@@ -24,19 +26,36 @@ float mass;
 #define GRAVITY 9.81
 #define ARM_LENGTH 0.2
 
+// velocity
+bool coilBstate = true;
+
 uint8_t duty_cycle = 0;
 
 // input
 char receivedChar;
 boolean newData = false;
 
+
 void setup() {
   //Serial.begin(9600);
   Serial.begin(9600);
+  Serial.println("starting...");
   // while (!Serial) {
   //   ;
   // }
 }
+
+// set to digital pins instead
+#define LEDRED 3
+#define COILBP 5
+#define COILBN 6
+
+#define COILAP 9
+#define COILAN 10
+#define LEDGREEN 11
+
+#define ON 70
+#define OFF 0
 
 void begininit() {
   // setup hall effect sensor
@@ -48,24 +67,26 @@ void begininit() {
 
   // Serial.println("initialized");
   // Serial.print("calibrated angle: ");
+  pinMode(LEDGREEN, OUTPUT);
   Serial.println(degAngle);
-}
 
-// set to digital pins instead
-#define COILAP 9
-#define COILAN 10
-//#define COILAGND 11
+  open_state();
+}
 
 void force_mode_setup() {
   pinMode(COILAP, OUTPUT);
   pinMode(COILAN, OUTPUT);
-  analogWrite(COILAP, 0);
-  analogWrite(COILAN, 0);
-  delay(1000);
+  analogWrite(COILAP, OFF);
+  analogWrite(COILAN, OFF);
+  
+  used_state();
+  
+  delay(500);
   forceMode = true;
 }
 
 void force_mode() {
+  // force mode setup should be complete
   // assuming pos is being updated
   //Serial.println(fabs(degAngle-calibratedAngle));
   if(fabs(degAngle-calibratedAngle) <= 0.08) {
@@ -74,9 +95,9 @@ void force_mode() {
     //Serial.print("pushing: ");
     //Serial.println(duty_cycle);
     analogWrite(COILAP, duty_cycle);
-    duty_cycle  = duty_cycle + 2;
+    duty_cycle  = duty_cycle + 3;
     //duty_cycle = max(0, min(duty_cycle, 255));
-    delay(200);
+    delay(300);
     readRawAngle();
     Serial.print("Angle Difference:");
     Serial.print(fabs(degAngle-calibratedAngle), 5);
@@ -87,10 +108,83 @@ void force_mode() {
   } else {
     delay(100);
     Serial.println("max voltage reached");
-    resetState();
+    update_mass();
   }
 
 }
+
+void open_state() {
+  analogWrite(LEDGREEN, ON);
+  analogWrite(LEDRED, OFF);
+}
+
+void used_state() {
+  analogWrite(LEDGREEN, OFF);
+  analogWrite(LEDRED, ON);
+}
+
+void calibrate() {
+  pinMode(COILAP, OUTPUT);
+  pinMode(COILAN, OUTPUT);
+
+  used_state();
+
+  analogWrite(COILAP, 200);
+  delay(6000);
+
+  readRawAngle();
+  c_value = fabs(degAngle-calibratedAngle);
+  Serial.println("calibrated diff: " + String(c_value));
+  analogWrite(COILAP, OFF);
+  degAngle = 0;
+  
+  open_state();
+
+}
+
+// void velocity_mode_setup() {
+//   analogWrite(COILAP, OFF);
+//   pinMode(COILAP, OUTPUT);
+//   pinMode(COILAN, OUTPUT);
+//   pinMode(COILAP, INPUT);
+//   pinMode(COILAN, INPUT);
+//   delay(500);
+//   forceMode = true;
+// }
+
+// void velocity_mode() {
+//   int t1, t2;
+//   double p1, p2, v1, v2;
+  
+//   drive_coil_b();
+//   t1 = millis();
+//   v1 = read_voltage();
+//   p1 = degAngle;
+//   double vel = (p2 - p1) * 1000 / (t2 - t1);
+// }
+
+double read_voltage() {
+  double adc_val = (double)analogRead(COILAP) - (double)analogRead(COILAN);
+  return (adc_val * 5.0)/ 1024.0;
+}
+
+// double bl[BL_ARRAY_SIZE];
+// int bl_index = 0;
+
+// void drive_coil_b() {
+//   if (millis() - prevCoilBSwitch < coilBswitchInterval) { // If not time to switch exit
+//     return;
+//   }
+
+//   if (coilBstate) {
+//     analogWrite(COILBP, OFF);
+//     analogWrite(COILBN, ON);
+//   } else {
+//     analogWrite(COILBP, ON);
+//     analogWrite(COILBN, OFF);
+//   }
+//   prevCoilBSwitch = millis();
+// }
 
 
 void readRawAngle() { 
@@ -127,18 +221,12 @@ double get_current(){
 }
 
 void update_mass(){
-  double bl = get_avg_bl();
   double i = get_current();
-  mass = 25 * bl * (i/GRAVITY);
+  mass = (sqrt(c_value)-0.3) * 100 * (i/GRAVITY);
 
   Serial.print("Measured mass (g): ");
   Serial.println(mass);
   resetState();
-}
-
-double get_avg_bl() {
-  // length is 3708ft
-  return 4;
 }
 
 void recvOneChar() {
@@ -155,6 +243,8 @@ void resetState() {
   pinMode(COILAN, OUTPUT);
   analogWrite(COILAP, 0);
   analogWrite(COILAN, 0);
+  analogWrite(LEDRED, 0);
+  analogWrite(LEDGREEN, 0);
   degAngle = 0;
   duty_cycle = 0;
   delay(100);
@@ -176,6 +266,10 @@ void loop() {
     force_mode_setup();
   }
 
+  if (receivedChar == 'c') {
+    calibrate();
+  }
+
   if (receivedChar == 'r') {
     resetState();
   }
@@ -193,6 +287,7 @@ void checkMagnetPresence() {
   //This function runs in the setup() and it locks the MCU until the magnet is not positioned properly
   while((magnetStatus & 32) != 32)  {
     magnetStatus = 0; //reset reading
+    Serial.print("|");
 
     Wire.beginTransmission(0x36); //connect to the sensor
     Wire.write(0x0B); //figure 21 - register map: Status: MD ML MH
@@ -201,5 +296,6 @@ void checkMagnetPresence() {
 
     while(Wire.available() == 0); //wait until it becomes available 
     magnetStatus = Wire.read(); //Reading the data after the request      
-  }        
+  }
+  Serial.print("\n");    
 }
