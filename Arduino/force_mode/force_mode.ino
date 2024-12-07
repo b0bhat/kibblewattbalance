@@ -34,6 +34,7 @@ uint8_t duty_cycle = 0;
 // input
 char receivedChar;
 boolean newData = false;
+boolean inUse = false;
 
 
 void setup() {
@@ -116,11 +117,13 @@ void force_mode() {
 void open_state() {
   analogWrite(LEDGREEN, ON);
   analogWrite(LEDRED, OFF);
+  inUse = false;
 }
 
 void used_state() {
   analogWrite(LEDGREEN, OFF);
   analogWrite(LEDRED, ON);
+  inUse = true;
 }
 
 void calibrate() {
@@ -128,6 +131,7 @@ void calibrate() {
   pinMode(COILAN, OUTPUT);
 
   used_state();
+  Serial.println("calibrating...");
 
   analogWrite(COILAP, 200);
   delay(6000);
@@ -237,7 +241,6 @@ void recvOneChar() {
 }
 
 void resetState() {
-  startFlag = false;
   forceMode = false;
   pinMode(COILAP, OUTPUT);
   pinMode(COILAN, OUTPUT);
@@ -249,6 +252,7 @@ void resetState() {
   duty_cycle = 0;
   delay(100);
   Serial.println("reset");
+  begininit();
 }
 
 void loop() {
@@ -260,6 +264,20 @@ void loop() {
     } else {
       return;
     }
+  }
+
+  if (forceMode) {
+      // do forcemode
+      readRawAngle();
+      force_mode();
+  }
+
+  if (inUse) {
+    return;
+  }
+
+  if (receivedChar == 'd') {
+    readRawAngle();
   }
 
   if (receivedChar == 'f') {
@@ -274,11 +292,7 @@ void loop() {
     resetState();
   }
 
-  if (forceMode) {
-      // do forcemode
-      readRawAngle();
-      force_mode();
-  }
+  
 
   //force_mode_test();
 }
